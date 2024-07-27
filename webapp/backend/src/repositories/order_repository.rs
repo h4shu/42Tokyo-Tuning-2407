@@ -43,98 +43,101 @@ impl OrderRepository for OrderRepositoryImpl {
     }
 
     async fn get_paginated_orders(
-        &self,
-        page: i32,
-        page_size: i32,
-        sort_by: Option<String>,
-        sort_order: Option<String>,
-        status: Option<String>,
-        area: Option<i32>,
-    ) -> Result<Vec<Order>, AppError> {
-        let offset = page * page_size;
-        let order_clause = format!(
-            "ORDER BY {} {}",
-            match sort_by.as_deref() {
-                Some("car_value") => "o.car_value",
-                Some("status") => "o.status",
-                Some("order_time") => "o.order_time",
-                _ => "o.order_time",
-            },
-            match sort_order.as_deref() {
-                Some("DESC") => "DESC",
-                Some("desc") => "DESC",
-                _ => "ASC",
-            }
-        );
+    &self,
+    page: i32,
+    page_size: i32,
+    sort_by: Option<String>,
+    sort_order: Option<String>,
+    status: Option<String>,
+    area: Option<i32>,
+) -> Result<Vec<Order>, AppError> {
+    let offset = page * page_size;
 
-        let where_clause = match (status.clone(), area) {
-            (Some(_), Some(_)) => "WHERE o.status = ? AND n.area_id = ?".to_string(),
-            (None, Some(_)) => "WHERE n.area_id = ?".to_string(),
-            (Some(_), None) => "WHERE o.status = ?".to_string(),
-            _ => "".to_string(),
-        };
+    // Order clauseの作成
+    let order_clause = format!(
+        "ORDER BY {} {}",
+        match sort_by.as_deref() {
+            Some("car_value") => "o.car_value",
+            Some("status") => "o.status",
+            Some("order_time") => "o.order_time",
+            _ => "o.order_time",
+        },
+        match sort_order.as_deref() {
+            Some("DESC") => "DESC",
+            Some("desc") => "DESC",
+            _ => "ASC",
+        }
+    );
 
-        let sql = format!(
-            "SELECT 
-                o.id, 
-                o.client_id, 
-                o.dispatcher_id, 
-                o.tow_truck_id, 
-                o.status, 
-                o.node_id, 
-                o.car_value, 
-                o.order_time, 
-                o.completed_time
-            FROM
-                orders o
-            JOIN
-                nodes n
-            ON 
-                o.node_id = n.id
-            {} 
-            {} 
-            LIMIT ? 
-            OFFSET ?",
-            where_clause, order_clause
-        );
+    // WHERE句とJOIN句の作成
+    let (where_clause, join_clause, binds) = match (status.clone(), area) {
+        (Some(status), Some(area)) => (
+            "WHERE o.status = ? AND n.area_id = ?",
+            "JOIN nodes n ON o.node_id = n.id",
+            vec![status, area.to_string()],
+        ),
+        (None, Some(area)) => (
+            "WHERE n.area_id = ?",
+            "JOIN nodes n ON o.node_id = n.id",
+            vec![area.to_string()],
+        ),
+        (Some(status), None) => (
+            "WHERE o.status = ?",
+            "",
+            vec![status],
+        ),
+        (None, None) => (
+            "",
+            "",
+            vec![],
+        ),
+    };
 
-        let orders = match (status, area) {
-            (Some(status), Some(area)) => {
-                sqlx::query_as::<_, Order>(&sql)
-                    .bind(status)
-                    .bind(area)
-                    .bind(page_size)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (None, Some(area)) => {
-                sqlx::query_as::<_, Order>(&sql)
-                    .bind(area)
-                    .bind(page_size)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            (Some(status), None) => {
-                sqlx::query_as::<_, Order>(&sql)
-                    .bind(status)
-                    .bind(page_size)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-            _ => {
-                sqlx::query_as::<_, Order>(&sql)
-                    .bind(page_size)
-                    .bind(offset)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-        };
+    let sql = format!(
+        "SELECT 
+            o.id, 
+            o.client_id, 
+            o.dispatcher_id, 
+            o.tow_truck_id, 
+            o.status, 
+            o.node_id, 
+            o.car_value, 
+            o.order_time, 
+            o.completed_time
+        FROM
+            orders o
+        {} 
+        {}
+        {} 
+        LIMIT ? 
+        OFFSET ?",
+        join_clause,
+        where_clause,
+        order_clause
+    );
 
-        Ok(orders)
+    // クエリの作成
+    let mut query = sqlx::query_as::<_, Order>(&sql);
+
+    // パラメータのバインド
+    for bind in binds {
+        if let Ok(value) = bind.parse::<i32>() {
+            query = query.bind::<i32>(value);
+        } else {
+            query = query.bind::<String>(bind);
+        }
     }
+
+    query = query.bind(page_size).bind(offset);
+
+    // クエリの実行
+    let orders = query.fetch_all(&self.pool).await?;
+
+    Ok(orders)
+}
+
+
+
 
     async fn create_order(
         &self,
