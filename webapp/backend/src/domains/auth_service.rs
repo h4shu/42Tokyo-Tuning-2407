@@ -1,6 +1,8 @@
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Cursor};
 use std::path::{Path, PathBuf};
+use image::imageops::FilterType;
+use image::ImageFormat;
 
 use actix_web::web::Bytes;
 use log::error;
@@ -177,7 +179,24 @@ impl<T: AuthRepository + std::fmt::Debug> AuthService<T> {
             AppError::InternalServerError
         })?;
 
-        Ok(Bytes::from(buffer))
+        // 画像を読み込む
+        let img = image::load_from_memory(&buffer).map_err(|e| {
+            error!("画像の読み込みに失敗しました: {:?}", e);
+            AppError::InternalServerError
+        })?;
+
+        // 画像をリサイズする
+        let resized_img = img.resize(500, 500, FilterType::Lanczos3);
+
+        // 画像をバッファに書き出す
+        let mut output_buffer = Vec::new();
+        resized_img.write_to(&mut Cursor::new(&mut output_buffer), ImageFormat::Png)
+            .map_err(|e| {
+                error!("リサイズされた画像の書き出しに失敗しました: {:?}", e);
+                AppError::InternalServerError
+            })?;
+
+        Ok(Bytes::from(output_buffer))
     }
 
     pub async fn validate_session(&self, session_token: &str) -> Result<bool, AppError> {
