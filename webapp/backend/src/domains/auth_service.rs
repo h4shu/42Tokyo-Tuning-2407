@@ -1,5 +1,6 @@
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use actix_web::web::Bytes;
 use log::error;
@@ -164,30 +165,19 @@ impl<T: AuthRepository + std::fmt::Debug> AuthService<T> {
             Err(_) => return Err(AppError::NotFound),
         };
 
-        let path: PathBuf =
-            Path::new(&format!("images/user_profile/{}", profile_image_name)).to_path_buf();
+        let path: PathBuf = Path::new(&format!("images/user_profile/{}", profile_image_name)).to_path_buf();
 
-        let output = Command::new("magick")
-            .arg(&path)
-            .arg("-resize")
-            .arg("500x500")
-            .arg("png:-")
-            .output()
-            .map_err(|e| {
-                error!("画像リサイズのコマンド実行に失敗しました: {:?}", e);
-                AppError::InternalServerError
-            })?;
+        let mut file = File::open(&path).map_err(|e| {
+            error!("画像ファイルのオープンに失敗しました: {:?}", e);
+            AppError::InternalServerError
+        })?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).map_err(|e| {
+            error!("画像ファイルの読み込みに失敗しました: {:?}", e);
+            AppError::InternalServerError
+        })?;
 
-        match output.status.success() {
-            true => Ok(Bytes::from(output.stdout)),
-            false => {
-                error!(
-                    "画像リサイズのコマンド実行に失敗しました: {:?}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                Err(AppError::InternalServerError)
-            }
-        }
+        Ok(Bytes::from(buffer))
     }
 
     pub async fn validate_session(&self, session_token: &str) -> Result<bool, AppError> {
