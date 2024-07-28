@@ -152,7 +152,8 @@ async fn main() -> std::io::Result<()> {
             )
     })
     .bind(format!("0.0.0.0:{port}"))?
-    .workers(1)
+    // 本番環境のコア数に合わせた
+    .workers(4)
     .run()
     .await
 }
